@@ -1,0 +1,12 @@
+# trap ctrl-c and call ctrl_c()
+trap 'rm /tmp/lock_exec_$(whoami) 2> /dev/null; echo "\n** cleaned-up"; exit 1' INT
+
+lock=$(ls /tmp/lock_exec_* 2> /dev/null);
+
+if [ "$lock" != "" ];
+then
+	echo "$(ls /tmp/lock_exec_*) exists";
+	exit 1;
+fi;
+
+touch "/tmp/lock_exec_$(whoami)" 2> /dev/null;

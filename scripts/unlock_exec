@@ -1,0 +1,1 @@
+rm "/tmp/lock_exec_$(whoami)" 2> /dev/null;
