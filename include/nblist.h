@@ -50,7 +50,7 @@ struct nblist {
 
 struct item {
     struct nblist_node link;
-    alignas(64) int value;
+    alignas(64) val_t value;
 };
 
 #define NBSL_LIST_INIT(name)            \

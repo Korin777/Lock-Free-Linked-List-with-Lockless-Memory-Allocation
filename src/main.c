@@ -139,13 +139,11 @@ void *test(void *data)
         /* we make sure the insert was effective (as opposed to just updating an
          * existing entry).
          */
-        // if (list_add(the_list, the_value) == 0)
-        //     i--;
+        // if(push(the_list,the_value))
         if (list_insert(the_list,the_value) == 0)
             i--;
-        // printf("%d\n",the_value);
     }
-    // printf("hey\n");
+
     /* Wait on barrier */
     barrier_cross(d->barrier);
     while (*running) { /* start the test */
@@ -156,24 +154,18 @@ void *test(void *data)
         if (op < read_thresh) { /* do a find operation */
             top(the_list);
         } else if (last == -1) { /* do a write operation */
-            if(push(the_list,the_value)) {
-            // if (list_insert(the_list, the_value)) {
-                // printf("insert %d\n",the_value);
+            if (list_insert(the_list, the_value)) {
                 d->n_insert++;
                 last = 1;
             }
         } else {
-            // if (list_remove(the_list, the_value)) { /* do a delete operation */
-            // printf("delete\n");
-            // if(list_delete(the_list,the_value)) {
-            if(pop(the_list)) {
-                // printf("delete %d\n",the_value);
+            if(list_delete(the_list,the_value)) {
                 d->n_remove++;
                 last = -1;
             }
         }
-        // printf("%d\n",the_value);
         d->n_ops++;
+        
     }
     return NULL;
 }
