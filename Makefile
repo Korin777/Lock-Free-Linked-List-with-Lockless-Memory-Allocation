@@ -1,7 +1,7 @@
-CFLAGS = -Wall -O2 -std=c11
+CFLAGS = -Wall -O2 -std=c11 -fsanitize=address
 CFLAGS += -I include
 CFLAGS += -D_GNU_SOURCE
-LDFLAGS += -lpthread
+LDFLAGS += -lpthread -fsanitize=address
 
 OUT = out
 EXEC = $(OUT)/linklist
@@ -11,6 +11,8 @@ all: $(EXEC)
 deps=
 LOCKFREE_OBJS =
 LOCKFREE_OBJS += src/nblist/nblist.o
+LOCKFREE_OBJS += src/nblist/mymemalloc.o
+LOCKFREE_OBJS += src/nblist/hp.o
 LOCKFREE_OBJS += src/main.o
 deps += $(LOCKFREE_OBJS:%.o=%.o.d)
 

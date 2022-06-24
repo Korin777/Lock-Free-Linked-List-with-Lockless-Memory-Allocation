@@ -5,6 +5,8 @@ Lock-free linkedlist implementation based on [Lock-Free Linked Lists and Skip Li
 
 Test program modified from [concurrent-ll](https://github.com/sysprog21/concurrent-ll)
 
+Hazard Pointer modified from [hp_list](https://github.com/sysprog21/concurrent-programs/tree/master/hp_list)
+
 [linux2022-quiz11](https://hackmd.io/@sysprog/linux2022-quiz11#%E6%B8%AC%E9%A9%97-2)
 
 [linux2022-quiz13](https://hackmd.io/@sysprog/linux2022-quiz13#%E6%B8%AC%E9%A9%97-1)

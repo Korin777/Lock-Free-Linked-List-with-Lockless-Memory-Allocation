@@ -1,3 +1,4 @@
+
 /* non-blocking singly-linked lists.
  *
  * the algorithm used was presented by Fomitchev and Ruppert in "Lock-Free
@@ -18,9 +19,14 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdalign.h>
+#include <threads.h>
+
+#include "mymemmalloc.h"
+
 
 
 typedef intptr_t val_t;
+
 
 
 /* container_of() - Calculate address of object that contains address ptr
@@ -38,6 +44,9 @@ typedef intptr_t val_t;
     })
 #endif
 
+
+
+
 struct nblist_node {
     _Atomic uintptr_t next;
     struct nblist_node *_Atomic backlink;
@@ -50,8 +59,8 @@ struct nblist {
 
 struct item {
     struct nblist_node link;
-    alignas(64) val_t value;
-};
+    val_t value;
+}; 
 
 #define NBSL_LIST_INIT(name)            \
     {                                   \
@@ -69,10 +78,10 @@ static inline void nblist_init(struct nblist *list)
 /* push @n at the head of @list, if the previous head == @top. returns true if
  * successful, false if the caller should refetch @top and try again.
  */
-bool nblist_push(struct nblist *list, struct nblist_node *top, struct nblist_node *n);
+bool nblist_push(struct nblist *list, struct nblist_node *top, struct nblist_node *n, int tid);
 
 /* pop first node from @list, returning it or NULL. */
-struct nblist_node *nblist_pop(struct nblist *list);
+struct nblist_node *nblist_pop(struct nblist *list,int tid);
 
 /* peek first node in @list, returning it or NULL. */
 struct nblist_node *nblist_top(struct nblist *list);
@@ -85,7 +94,7 @@ struct nblist_node *nblist_top(struct nblist *list);
  * returns; in the second, @n will have been removed from @list once every
  * concurrent call to nblist_del() and nblist_push() have returned.
  */
-bool nblist_del(struct nblist *list, struct nblist_node *n);
+bool nblist_del(struct nblist *list, struct nblist_node *n, int tid);
 
 struct nblist_iter {
     struct nblist_node *prev, *cur;
@@ -106,14 +115,16 @@ struct nblist_node *nblist_next(struct nblist *list, struct nblist_iter *it);
  * a sequence of nblist_del_at() and nblist_next() can be used to pop all nodes
  * from @list from a certain point onward.
  */
-bool nblist_del_at(struct nblist *list, struct nblist_iter *it);
+bool nblist_del_at(struct nblist *list, struct nblist_iter *it, int tid);
 
 int list_size(struct nblist *list);
 
 void list_print(struct nblist *list);
 
+void list_destroy(struct nblist *list);
 
 
-bool list_insert(struct nblist *the_list, val_t val);
+
+bool list_insert(struct nblist *the_list, val_t val,vm_t *vm[], int tid);
 struct nblist_node *list_search(val_t val, struct nblist_node *curr_node, struct nblist_node **left_node);
-bool list_delete(struct nblist *the_list, val_t val);
+bool list_delete(struct nblist *the_list, val_t val, int tid);
