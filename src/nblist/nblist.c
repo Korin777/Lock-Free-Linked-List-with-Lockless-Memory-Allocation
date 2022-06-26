@@ -32,7 +32,7 @@ static inline struct nblist_node *n_ptr(uintptr_t x)
 // n: del_node   
 static bool try_flag(struct nblist_node **pp,
                      uintptr_t p_val,
-                     struct nblist_node *n)
+                     struct nblist_node *n, int tid)
 {
     struct nblist_node *p = *pp;
     const uintptr_t new_val = (uintptr_t) n | F_FLAG;
@@ -63,7 +63,7 @@ static bool try_flag(struct nblist_node **pp,
             p_val = atomic_load_explicit(&p->next, memory_order_relaxed);
         }
 
-        struct nblist_node *del_node = list_search(container_of(n,struct item,link)->value-1,p,&p);
+        struct nblist_node *del_node = list_search(container_of(n,struct item,link)->value-1,p,&p,tid);
         if(del_node != n) {
             *pp = NULL;
             return false;
@@ -78,7 +78,7 @@ static bool try_flag(struct nblist_node **pp,
 // prev: del_node's predecessor
 // n: del_node
 // nextval: del_node's sucessor with mark
-static inline void rend_the_marked(struct nblist_node *prev,
+static inline bool rend_the_marked(struct nblist_node *prev,
                                    struct nblist_node *n,
                                    uintptr_t nextval)
 {
@@ -86,7 +86,7 @@ static inline void rend_the_marked(struct nblist_node *prev,
     assert((nextval & F_FLAG) == 0);
     uintptr_t prevval = (uintptr_t) n | F_FLAG;
 
-    atomic_compare_exchange_strong_explicit(
+    return atomic_compare_exchange_strong_explicit(
         &prev->next, &prevval, nextval & ~F__MASK, memory_order_release,
         memory_order_relaxed);
 }
@@ -94,7 +94,7 @@ static inline void rend_the_marked(struct nblist_node *prev,
 /* complete removal of @n from flagged parent @prev. */
 // prev: del_node's predecessor
 // n: del_node
-static void clear_flag(struct nblist_node *prev, struct nblist_node *n, int tid)
+static bool clear_flag(struct nblist_node *prev, struct nblist_node *n, int tid)
 {
     // Setting n's backlink to point to its predecessor
     struct nblist_node *old =
@@ -106,8 +106,9 @@ static void clear_flag(struct nblist_node *prev, struct nblist_node *n, int tid)
     while ((nextval & F_MARK) == 0) { // mark n
         while ((nextval & F_FLAG) != 0) { // n->next 要被移除 , 要先移出它才能 mark n
             list_hp_protect_ptr(hp, 2, nextval & ~F__MASK, tid);
-            if((n->next & ~F__MASK) == nextval)
+            if(n->next == nextval) {
                 clear_flag(n, n_ptr(nextval),tid);
+            }
             nextval = atomic_load(&n->next);
         }
         if (atomic_compare_exchange_strong_explicit(
@@ -117,34 +118,64 @@ static void clear_flag(struct nblist_node *prev, struct nblist_node *n, int tid)
         }
     }
 
-    rend_the_marked(prev, n, nextval);
+    return rend_the_marked(prev, n, nextval);
 }
 
 
 /*     Search from curr_node and find two consecutive nodes
  *   n1 and n2 such that n1.value ≤ k < n2.value
  */
-struct nblist_node *list_search(val_t val, struct nblist_node *curr_node, struct nblist_node **left_node)
-{
-    uintptr_t curr_p = atomic_load(&curr_node->next);
-    struct nblist_node *next_node = n_ptr(curr_p);
+struct nblist_node *list_search(val_t val, struct nblist_node *curr_node, struct nblist_node **left_node, int tid) {
+    uintptr_t curr_p;
+    struct nblist_node *next_node = NULL;
+retry:
+    // curr_node = &the_list->n;
+    // printf("%p %p\n",curr_node,hp->hp[tid][0]);
+    curr_p = atomic_load(&curr_node->next);
+    next_node = n_ptr(curr_p);
+    list_hp_protect_ptr(hp, 2, (uintptr_t) next_node, tid);
+    if((atomic_load(&curr_node->next) & ~F__MASK) != ((uintptr_t)next_node)) {
+        // printf("%p %p\n",(atomic_load(&curr_node->next) & ~F__MASK),((uintptr_t)next_node));
+        goto retry;
+    }
+    // printf("%p %p\n",next_node,hp->hp[tid][2]);
 
     while(next_node && (container_of(next_node,struct item, link)->value <= val)) {
         uintptr_t next_p = atomic_load(&next_node->next);
+
+        list_hp_protect_ptr(hp, 1, (uintptr_t) next_p & ~F__MASK, tid);
+        if((atomic_load(&next_node->next) & ~F__MASK) != (next_p & ~F__MASK))
+            goto retry;
+
         while((next_p & F_MARK) && (curr_p & F_FLAG)) {
             if(n_ptr(curr_node->next) == next_node) {// help physically delete
                 rend_the_marked(curr_node,next_node,next_p);
             }
             curr_p = atomic_load(&curr_node->next);
             next_node = n_ptr(curr_p);
+            list_hp_protect_ptr(hp, 2, (uintptr_t) next_node, tid);
+            if((atomic_load(&curr_node->next) & ~F__MASK) != (uintptr_t) next_node) {
+                // printf("retry\n");
+                goto retry;
+            }
             if(next_node == 0) // arrive list end
                 break;
             next_p = atomic_load(&next_node->next);
+
+            list_hp_protect_ptr(hp, 1, (uintptr_t) next_p & ~F__MASK, tid);
+            if((atomic_load(&next_node->next) & ~F__MASK) != (next_p & ~F__MASK))
+                goto retry;
         }
         if(next_node && container_of(next_node,struct item, link)->value <= val) {
             curr_node = next_node;
+            list_hp_protect_ptr(hp, 0, (uintptr_t) curr_node, tid);
             curr_p = atomic_load(&curr_node->next);
             next_node = n_ptr(curr_p);
+            list_hp_protect_ptr(hp, 2, (uintptr_t) next_node, tid);
+            if((atomic_load(&curr_node->next) & ~F__MASK) != (uintptr_t) next_node) {
+                // printf("retry\n");
+                goto retry;
+            }
         }
     }
 
@@ -155,15 +186,22 @@ struct nblist_node *list_search(val_t val, struct nblist_node *curr_node, struct
 
 bool list_insert(struct nblist *the_list, val_t val,vm_t *vm[], int tid)
 {
-    struct nblist_node *prev = NULL;
-    struct nblist_node *next = list_search(val, &the_list->n, &prev);
+    struct nblist_node *prev = NULL, *next = NULL;
+// retry:
+    list_hp_protect_ptr(hp, 0, (uintptr_t) &the_list->n, tid);
+    next = list_search(val, &the_list->n, &prev,tid);
 
-    if(container_of(prev,struct item,link)->value == val) // duplicate key
+    if(prev != &the_list->n && container_of(prev,struct item,link)->value == val) { // duplicate key
+        list_hp_clear(hp,tid);
         return false;
+    }
     struct item *it = malloc(sizeof(*it));
+    // printf("%p\n",it);
     // struct item *it = (struct item *)vm_add(sizeof(struct item),vm[0]);
-    if(!it)
+    if(!it) {
+        list_hp_clear(hp,tid);
         return false;
+    }
     it->value = val;
     it->link.next = 0;
     it->link.backlink = NULL;
@@ -173,26 +211,42 @@ bool list_insert(struct nblist *the_list, val_t val,vm_t *vm[], int tid)
     
     while (1) {
         uintptr_t prev_succ = prev->next; 
-        if(prev_succ & F_FLAG) // help the corresponding deletion to complete
-            clear_flag(prev,n_ptr(prev_succ),tid);
+        if(prev_succ & F_FLAG) { // help the corresponding deletion to complete
+            list_hp_protect_ptr(hp, 1, prev_succ & ~F_FLAG, tid);
+            if(prev->next == prev_succ)
+                clear_flag(prev,n_ptr(prev_succ),tid);
+        }
         else {
             newNode->next = (uintptr_t)next;
             if(atomic_compare_exchange_strong_explicit(&prev->next, &next, (uintptr_t) newNode,
                         memory_order_release, memory_order_relaxed)) {
                 // ensure prev and next are consecutive and prev isn't marked or flaged
+                list_hp_clear(hp,tid);
                 return true;
             }
             else {
                 prev_succ = prev->next; 
-                if(prev_succ & F_FLAG)
-                    clear_flag(prev,n_ptr(prev_succ),tid); 
-                while(prev->next & F_MARK) // Possibly a failure due to marking. Traverse a chain of backlinks to reach an unmarked node.
+                if(prev_succ & F_FLAG) {
+                    list_hp_protect_ptr(hp, 1, prev_succ & ~F_FLAG, tid);
+                    if(prev->next == prev_succ)
+                        clear_flag(prev,n_ptr(prev_succ),tid); 
+                }
+                while(prev->next & F_MARK) { // Possibly a failure due to marking. Traverse a chain of backlinks to reach an unmarked node.
+                    // free(it);
+                    // goto retry;
                     prev = prev->backlink;
+                }
+                // list_hp_protect_ptr(hp, 0, (uintptr_t) prev, tid);
+                // if((curr_node->next & ~F__MASK) != (uintptr_t) next_node)
+                //     goto retry;
             }
         }
-        next = list_search(val,prev,&prev); // search two consecutive node again from prev node
-        if(container_of(prev,struct item,link)->value == val) {
-            // free(it);
+        // free(it);
+        // goto retry;
+        next = list_search(val,prev,&prev,tid); // search two consecutive node again from prev node
+        if(prev != &the_list->n && container_of(prev,struct item,link)->value == val) {
+            list_hp_clear(hp,tid);
+            free(it);
             return false;
         }
     }
@@ -201,12 +255,12 @@ bool list_insert(struct nblist *the_list, val_t val,vm_t *vm[], int tid)
 bool list_delete(struct nblist *the_list, val_t val, int tid)
 {
     struct nblist_node *prev = NULL;
-    struct nblist_node *next = list_search(val-1, &the_list->n, &prev);
+    struct nblist_node *next = list_search(val-1, &the_list->n, &prev,tid);
 
     if(!next || container_of(next,struct item,link)->value != val) // no such key
         return false;
 
-    bool got = try_flag(&prev, prev->next, next);
+    bool got = try_flag(&prev, prev->next, next,tid);
     
     if (prev)
         clear_flag(prev, next,tid);
@@ -267,7 +321,6 @@ retry:
     }
     if (!n) // empty
         return NULL;
-
     clear_flag(p, n, tid);
     list_hp_clear(hp,tid);
     list_hp_retire(hp,n,tid);
@@ -304,7 +357,7 @@ bool nblist_del(struct nblist *list, struct nblist_node *target, int tid)
         return false;
 
     /* flag and delete. */
-    bool got = try_flag(&p, p_val, n); // Flagging the predecessor node
+    bool got = try_flag(&p, p_val, n,tid); // Flagging the predecessor node
     if (p)
         clear_flag(p, n, tid);
     return got;
@@ -352,7 +405,7 @@ bool nblist_del_at(struct nblist *list, struct nblist_iter *it, int tid)
 
     struct nblist_node *p = it->prev;
     uintptr_t p_val = atomic_load_explicit(&p->next, memory_order_acquire);
-    bool got = try_flag(&p, p_val, it->cur);
+    bool got = try_flag(&p, p_val, it->cur,tid);
     it->prev = NULL;
     if (p)
         clear_flag(p, it->cur, tid);
@@ -377,6 +430,7 @@ void list_print(struct nblist *list)
         printf("%ld ",container_of(n,struct item,link)->value);
         n = (struct nblist_node *) n->next;
     }
+    printf("\n");
 }
 
 void list_destroy(struct nblist *list) {
