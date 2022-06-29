@@ -4,7 +4,7 @@
 
 
 # Note
-1. Change `HP_MAX_THREADS` in ``include/hp.h` if number of thread more than default(30)
+1. Change `HP_MAX_THREADS` in `include/hp.h` if number of thread more than default(30)
 2. Operate linked list with insert and delete or push and pop , don't mix them , it can modified from `test` function in `src/main.c`
 3. insert and delete don't support memory reclamation
 4. use `-DMY_MALLOC` to use my memory allocator
