@@ -14,6 +14,8 @@
 #include "mymemmalloc.h"
 #include "hp.h"
 
+
+
 #define XSTR(s) STR(s)
 #define STR(s) #s
 
@@ -30,8 +32,8 @@
 /* the maximum value the key stored in the list can take; defines key range */
 #define DEFAULT_RANGE 2048
 
-#define TID_UNKNOWN -1
-static thread_local int tid_v = TID_UNKNOWN;
+// #define TID_UNKNOWN -1
+// static thread_local int tid_v = TID_UNKNOWN;
 
 
 static uint32_t finds;
@@ -43,10 +45,8 @@ static ALIGNED(64) uint8_t running[64];
 /* per-thread seeds for the custom random function */
 __thread uint64_t *seeds;
 
-static struct nblist *the_list;
-
-// static vm_t *vm[64];
-static struct vm_head vm[64];
+// static struct nblist *the_list;
+// static struct vm_head vm[64];
 
 
 static _Atomic int_fast32_t tid_v_base;
@@ -63,19 +63,24 @@ static inline int tid(void)
 
 static void free_func(void *arg)
 {
-    struct item *it = (struct item *) arg;
+    #ifdef MY_MALLOC
+    uintptr_t it = (uintptr_t) arg;
+    vm_remove(it);
+    #else 
+    struct item *it = (struct item*) arg;
     free(it);
-    // printf("free!\n");
+    #endif
 }
 
 
 
 static struct item *push(struct nblist *list, int value)
 {
-    struct item *it = malloc(sizeof(*it));
-    // struct item *it = (struct item *)vm_add(sizeof(struct item),&vm[tid()]);
-    // assert((((uintptr_t)it & 0xfff) >= 0x410));
-
+    #ifdef MY_MALLOC
+    item_t *it = (item_t *)vm_add(sizeof(*it));
+    #else
+    item_t *it = malloc(sizeof(*it));
+    #endif
     it->value = value;
     it->link.backlink = NULL;
     it->link.next = 0;
@@ -144,7 +149,7 @@ typedef ALIGNED(64) struct thread_data {
     unsigned long n_insert; /* number of inserts a thread performs */
     unsigned long n_remove; /* number of removes a thread performs */
     unsigned long n_search; /* number of searches a thread performs */
-    // int id; /* the id of the thread (used for thread placement on cores) */
+    int id; /* the id of the thread (used for thread placement on cores) */
 } thread_data_t;
 
 void *test(void *data)
@@ -159,8 +164,9 @@ void *test(void *data)
     seeds = seed_rand(); /* the custom random number generator */
     uint32_t rand_max = max_key;
     val_t the_value;
-    int last = -1;
+    int last = -1 , count = 0;
     tid();
+    vm[tid_v].id = tid_v;
 
     /* before starting the test, we insert a number of elements in the data
      * structure.
@@ -173,8 +179,8 @@ void *test(void *data)
         /* we make sure the insert was effective (as opposed to just updating an
          * existing entry).
          */
-        if(push(the_list,the_value) == 0)
-        // if (list_insert(the_list,the_value,vm,tid()) == 0)
+        // if(push(the_list,the_value) == 0)
+        if (list_insert(the_list,the_value,tid_v) == 0)
             i--;
     }
 
@@ -190,20 +196,21 @@ void *test(void *data)
         if (op < read_thresh) { /* do a find operation */
             top(the_list);
         } else if (last == -1) { /* do a write operation */
-            // if (list_insert(the_list, the_value,vm,tid())) {
-            if(push(the_list,the_value)) {
+            // if(push(the_list,the_value)) {
+            if (list_insert(the_list, the_value,tid_v)) {
                 d->n_insert++;
-                last = 1;
+                if(++count >= 50)
+                    last = 1;
             }
         } else {
-            if(pop(the_list)) {
-            // if(list_delete(the_list,the_value)) {
+            // if(pop(the_list)) {
+            if(list_delete(the_list,the_value,tid_v)) {
                 d->n_remove++;
-                last = -1;
+                if(--count <= 0)
+                    last = -1;
             }
         }
-        d->n_ops++;
-        
+        d->n_ops++;    
     }
     free(seeds);
     return NULL;
@@ -317,14 +324,11 @@ int main(int argc, char *const argv[])
     max_key = next_power_of_two(max_key) - 1;
 
 
-    /* initialization of the list */
-    // the_list = list_new();
     the_list = malloc(sizeof(*the_list));
     nblist_init(the_list);
-    hp = list_hp_new(3,free_func);
+    hp = list_hp_new(5,free_func);
+    vm = calloc(n_threads,sizeof(*vm));
 
-    for(int i = 0; i < n_threads; i++)
-        vm[i].h.next = vm_new();
 
     /* initialize the data which will be passed to the threads */
     if ((data = malloc(n_threads * sizeof(thread_data_t))) == NULL) {
@@ -420,12 +424,19 @@ int main(int argc, char *const argv[])
            operations * 1000.0 / duration);
     printf("Expected size: %ld Actual size: %d\n", reported_total,
            list_size(the_list));
+    printf("mmap usage: %ld\n",mmap_count);
 
     // list_print(the_list);
+    for(int i = 0; i < n_threads; i++)
+        list_hp_retire_clear(hp,i);
+    list_hp_destroy(hp);
     list_destroy(the_list);
     free(the_list);
     free(threads);
     free(data);
+    for(int i = 0; i < n_threads; i++)
+        vm_destroy(&vm[i]);
+
 
     return 0;
 }

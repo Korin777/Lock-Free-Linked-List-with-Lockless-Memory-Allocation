@@ -1,6 +1,6 @@
 /.vscode
-shell.sh
 /out
 *.o
 *.o.d
 shell.sh
+/src/MY_MALLOC

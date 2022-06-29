@@ -12,21 +12,17 @@
  */
 
 #pragma once
-
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdalign.h>
-#include <threads.h>
+#include <assert.h>
 
 #include "mymemmalloc.h"
 
-
-
 typedef intptr_t val_t;
-
 
 
 /* container_of() - Calculate address of object that contains address ptr
@@ -45,8 +41,6 @@ typedef intptr_t val_t;
 #endif
 
 
-
-
 struct nblist_node {
     _Atomic uintptr_t next;
     struct nblist_node *_Atomic backlink;
@@ -57,10 +51,10 @@ struct nblist {
     struct nblist_node n;
 };
 
-struct item {
+typedef struct item {
     struct nblist_node link;
     val_t value;
-}; 
+} item_t; 
 
 #define NBSL_LIST_INIT(name)            \
     {                                   \
@@ -85,6 +79,19 @@ struct nblist_node *nblist_pop(struct nblist *list,int tid);
 
 /* peek first node in @list, returning it or NULL. */
 struct nblist_node *nblist_top(struct nblist *list);
+
+int list_size(struct nblist *list);
+void list_print(struct nblist *list);
+void list_destroy(struct nblist *list);
+bool list_insert(struct nblist *the_list, val_t val, int tid);
+struct nblist_node *list_search(val_t val, struct nblist_node *curr_node, struct nblist_node **left_node,int tid);
+bool list_delete(struct nblist *the_list, val_t val, int tid);
+struct nblist *the_list;
+
+
+
+
+
 
 /* remove @n from @list. O(n).
  *
@@ -116,15 +123,3 @@ struct nblist_node *nblist_next(struct nblist *list, struct nblist_iter *it);
  * from @list from a certain point onward.
  */
 bool nblist_del_at(struct nblist *list, struct nblist_iter *it, int tid);
-
-int list_size(struct nblist *list);
-
-void list_print(struct nblist *list);
-
-void list_destroy(struct nblist *list);
-
-
-
-bool list_insert(struct nblist *the_list, val_t val,vm_t *vm[], int tid);
-struct nblist_node *list_search(val_t val, struct nblist_node *curr_node, struct nblist_node **left_node);
-bool list_delete(struct nblist *the_list, val_t val, int tid);

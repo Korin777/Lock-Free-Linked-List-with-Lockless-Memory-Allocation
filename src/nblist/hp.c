@@ -87,3 +87,29 @@ void list_hp_retire(list_hp_t *hp, uintptr_t ptr, int tid)
         }
     }
 }
+
+void list_hp_retire_clear(list_hp_t *hp, int tid)
+{
+    retirelist_t *rl = hp->rl[tid];
+    for (size_t iret = 0; iret < rl->size;) {
+        uintptr_t obj = rl->list[iret];
+        bool can_delete = true;
+        for (int itid = 0; itid < HP_MAX_THREADS && can_delete; itid++) {
+            for (int ihp = hp->max_hps - 1; ihp >= 0; ihp--) {
+                if (atomic_load(&hp->hp[itid][ihp]) == obj) {
+                    can_delete = false;
+                    break;
+                }
+            }
+        }
+
+        if (can_delete) {
+            size_t bytes = (rl->size - iret) * sizeof(rl->list[0]);
+            memmove(&rl->list[iret], &rl->list[iret + 1], bytes);
+            rl->size--;
+            hp->deletefunc((void *) obj);
+        } else {
+            iret++;
+        }
+    }
+}

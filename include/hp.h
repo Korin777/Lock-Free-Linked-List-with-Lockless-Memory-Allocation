@@ -4,8 +4,9 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <string.h>
 
-#define HP_MAX_THREADS 10
+#define HP_MAX_THREADS 30
 
 #define HP_MAX_HPS 5
 
@@ -29,6 +30,7 @@ typedef struct list_hp {
     list_hp_deletefunc_t *deletefunc;
 } list_hp_t;
 
+list_hp_t *hp;
 
 /* Create a new hazard pointer array of size 'max_hps' (or a reasonable
  * default value if 'max_hps' is 0). The function 'deletefunc' will be
@@ -67,7 +69,5 @@ uintptr_t list_hp_protect_release(list_hp_t *hp, int ihp, uintptr_t ptr, int tid
  */
 void list_hp_retire(list_hp_t *hp, uintptr_t ptr, int tid);
 
-static void free_func(void *arg);
+void list_hp_retire_clear(list_hp_t *hp, int tid);
 
-
-list_hp_t *hp;

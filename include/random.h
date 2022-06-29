@@ -44,8 +44,10 @@ static inline ticks getticks(void)
 static inline uint64_t *seed_rand()
 {
     uint64_t *_seeds;
-    if (posix_memalign((void **) &_seeds, 64, 64) != 0) /* something wrong */
+    if (posix_memalign((void **) &_seeds, 64, 64) != 0) { /* something wrong */
+        printf("seed Error\n");
         return NULL;
+    }
 
     _seeds[0] = getticks() % 123456789;
     _seeds[1] = getticks() % 362436069;
